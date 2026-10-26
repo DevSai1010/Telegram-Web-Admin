@@ -11,7 +11,7 @@ import kotlin.math.min
 /** Panel message ids are millisecond timestamps as strings: longer = newer, equal length compares lexically. */
 fun compareIds(a: String, b: String): Int =
     if (a.length != b.length) a.length.compareTo(b.length) else a.compareTo(b)
-
+÷
 /** Sort key for SQLite (ids are digit strings; anything else sorts first). */
 fun sortKeyOf(id: String): Long = id.toLongOrNull() ?: 0L
 
