@@ -295,13 +295,10 @@ fun ChatScreen(chatId: String, onBack: () -> Unit) {
                     }
                 }
                 // jump to latest (small FAB) + count of messages that arrived while scrolled away
-                AnimatedVisibility(
-                    visible = !atBottom,
-                    enter = scaleIn() + fadeIn(),
-                    exit = scaleOut() + fadeOut(),
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-                ) {
-                    Box {
+                if (!atBottom) {
+                    Box(
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                    ) {
                         SmallFloatingActionButton(
                             onClick = { scope.launch { listState.animateScrollToItem(0) } },
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
