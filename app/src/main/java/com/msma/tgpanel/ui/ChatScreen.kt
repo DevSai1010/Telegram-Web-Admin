@@ -369,7 +369,7 @@ fun ChatScreen(chatId: String, onBack: () -> Unit) {
                     }
                 }
                 // jump to latest (small FAB) + count of messages that arrived while scrolled away
-                AnimatedVisibility(
+                androidx.compose.animation.AnimatedVisibility(
                     visible = !atBottom,
                     enter = scaleIn() + fadeIn(),
                     exit = scaleOut() + fadeOut(),
@@ -662,12 +662,12 @@ private fun Composer(
                         )
                         // send when there is text, microphone when there is not (same morph as the web composer)
                         Box(Modifier.padding(4.dp)) {
-                            AnimatedVisibility(visible = draft.isNotBlank(), enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
+                            androidx.compose.animation.AnimatedVisibility(visible = draft.isNotBlank(), enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
                                 FilledIconButton(onClick = onSend, enabled = !sending, modifier = Modifier.size(48.dp)) {
                                     Icon(Icons.AutoMirrored.Rounded.Send, stringResource(R.string.send))
                                 }
                             }
-                            AnimatedVisibility(visible = draft.isBlank(), enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
+                            androidx.compose.animation.AnimatedVisibility(visible = draft.isBlank(), enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
                                 IconButton(onClick = onMic, enabled = !sending, modifier = Modifier.size(48.dp)) {
                                     Icon(Icons.Rounded.Mic, stringResource(R.string.record_voice))
                                 }
