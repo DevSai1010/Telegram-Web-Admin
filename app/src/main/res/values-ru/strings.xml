@@ -51,7 +51,6 @@
     <string name="media_sticker">Стикер</string>
     <string name="media_gif">GIF</string>
     <string name="media_doc">Файл</string>
-    <string name="media_soon">Воспроизведение появится в следующей версии</string>
     <string name="role_owner">🧑 (я)</string>
     <string name="role_admin">🖥 (панель)</string>
     <string name="role_model">🤖 (ИИ)</string>
@@ -93,5 +92,27 @@
     <string name="about">О приложении</string>
     <string name="version_fmt">Версия %1$s</string>
     <string name="language">Язык</string>
-    <string name="language_value">По языку системы (فارسی, English, Русский)</string>
+    <string name="ch_messages">Новые сообщения</string>
+    <string name="ch_service">Живое соединение</string>
+    <string name="service_title">Панель подключена</string>
+    <string name="service_text">Мгновенная доставка включена</string>
+    <string name="keep_title">Постоянное соединение</string>
+    <string name="keep_body">Если включено, приложение остаётся на связи в фоне и показывает новые сообщения уведомлениями. Android покажет небольшое постоянное уведомление, а заряд расходуется чуть больше.</string>
+    <string name="attach">Прикрепить</string>
+    <string name="attach_gallery">Фото или видео</string>
+    <string name="attach_camera">Камера</string>
+    <string name="attach_file">Файл</string>
+    <string name="record_voice">Записать голосовое</string>
+    <string name="recording">Запись…</string>
+    <string name="mic_denied">Нужно разрешение на микрофон.</string>
+    <string name="record_failed">Не удалось начать запись</string>
+    <string name="upload_failed">Не удалось отправить файл</string>
+    <string name="file_too_big">Файл больше 50 МБ и не может быть отправлен.</string>
+    <string name="play">Воспроизвести</string>
+    <string name="pause">Пауза</string>
+    <string name="language_pick">Выбор языка</string>
+    <string name="language_system">Язык системы</string>
+    <string name="language_fa">فارسی</string>
+    <string name="language_en">English</string>
+    <string name="language_ru">Русский</string>
 </resources>

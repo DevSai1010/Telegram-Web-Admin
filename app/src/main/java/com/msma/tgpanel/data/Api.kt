@@ -2,6 +2,8 @@ package com.msma.tgpanel.data
 
 import android.os.Build
 import com.msma.tgpanel.BuildConfig
+import android.content.Context
+import android.net.Uri
 import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
@@ -13,7 +15,13 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.Headers
+import okhttp3.MediaType
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
+import okio.BufferedSink
+import okio.source
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -33,6 +41,7 @@ class Api(private val prefs: Prefs) {
     val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)           // uploads of tens of MB on a slow link
         .pingInterval(25, TimeUnit.SECONDS)          // keeps the WebSocket honest (a dead peer fails fast)
         .build()
 
@@ -136,6 +145,38 @@ class Api(private val prefs: Prefs) {
         if (r == null || r.code !in 200..299) return failure(r)
         val ack = parse<ApiAck>(r.body) ?: return ApiResult.Err(r.code, "bad response")
         return if (ack.error.isNotEmpty()) ApiResult.Err(r.code, ack.error) else ApiResult.Ok(ack)
+    }
+
+    /** Streams a picked file / recording to POST /api/send-media (multipart) without loading it into memory. */
+    suspend fun sendMedia(
+        ctx: Context, uri: Uri, fileName: String, mime: String, size: Long, type: String, chatId: String,
+        caption: String, senderMode: String, businessConnectionId: String, replyToMsgId: String?,
+    ): ApiResult<ApiAck> = withContext(Dispatchers.IO) {
+        try {
+            val body = object : RequestBody() {
+                override fun contentType(): MediaType? = mime.toMediaTypeOrNull()
+                override fun contentLength(): Long = size
+                override fun writeTo(sink: BufferedSink) {
+                    ctx.contentResolver.openInputStream(uri)?.use { sink.writeAll(it.source()) } ?: throw IOException("cannot open $uri")
+                }
+            }
+            val mb = MultipartBody.Builder().setType(MultipartBody.FORM)
+                .addFormDataPart("chatId", chatId)
+                .addFormDataPart("type", type)
+                .addFormDataPart("senderMode", senderMode)
+                .addFormDataPart("file", fileName, body)
+            if (caption.isNotEmpty()) mb.addFormDataPart("caption", caption)
+            if (businessConnectionId.isNotEmpty()) mb.addFormDataPart("businessConnectionId", businessConnectionId)
+            if (!replyToMsgId.isNullOrEmpty()) mb.addFormDataPart("replyToMsgId", replyToMsgId)
+            val rb = Request.Builder().url(prefs.baseUrl + "/api/send-media").post(mb.build())
+            if (prefs.token.isNotEmpty()) rb.header("Authorization", "Bearer " + prefs.token)
+            val raw = http.newCall(rb.build()).execute().use { r -> RawResponse(r.code, r.body?.string() ?: "", r.headers) }
+            if (raw.code !in 200..299) return@withContext failure(raw)
+            val ack = parse<ApiAck>(raw.body) ?: return@withContext ApiResult.Err(raw.code, "bad response")
+            if (ack.error.isNotEmpty()) ApiResult.Err(raw.code, ack.error) else ApiResult.Ok(ack)
+        } catch (e: IOException) {
+            ApiResult.Err(0)
+        }
     }
 
     // ---- devices ----

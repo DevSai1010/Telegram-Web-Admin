@@ -33,10 +33,20 @@ class Prefs(ctx: Context) {
         get() = sp.getString("chats_etag", "") ?: ""
         set(v) = sp.edit().putString("chats_etag", v).apply()
 
+    /** "Always-on connection": a foreground service keeps the live connection while the app is in the background. */
+    var keepConnected: Boolean
+        get() = sp.getBoolean("keep_connected", false)
+        set(v) = sp.edit().putBoolean("keep_connected", v).apply()
+
+    /** "" = follow the system, otherwise "fa" / "en" / "ru". */
+    var language: String
+        get() = sp.getString("lang", "") ?: ""
+        set(v) = sp.edit().putString("lang", v).apply()
+
     val loggedIn: Boolean get() = token.isNotEmpty()
 
     /** Sign out locally: forget the session and every sync marker (the DB is cleared by App.logout). */
     fun clearSession() {
-        sp.edit().remove("token").remove("username").remove("owner").remove("cursor").remove("chats_etag").apply()
+        sp.edit().remove("token").remove("username").remove("owner").remove("cursor").remove("chats_etag").remove("keep_connected").apply()
     }
 }

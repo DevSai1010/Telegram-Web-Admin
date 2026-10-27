@@ -39,6 +39,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -76,6 +78,8 @@ fun SettingsScreen(onBack: () -> Unit, onDevices: () -> Unit) {
     var notifOk by remember { mutableStateOf(notificationsOn(ctx)) }
     var batteryOk by remember { mutableStateOf(batteryExempt(ctx)) }
     var confirmLogout by remember { mutableStateOf(false) }
+    var keepOn by remember { mutableStateOf(app.prefs.keepConnected) }
+    var pickLang by remember { mutableStateOf(false) }
 
     // the user may change these in system settings and come back — re-read on every resume
     val owner = LocalLifecycleOwner.current
@@ -146,18 +150,63 @@ fun SettingsScreen(onBack: () -> Unit, onDevices: () -> Unit) {
                     onClick = { askBattery() },
                 )
             }
+            // opt-in: a small permanent notification, in exchange for messages that keep arriving with the app closed
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.keep_title)) },
+                supportingContent = { Text(stringResource(R.string.keep_body)) },
+                trailingContent = { Switch(checked = keepOn, onCheckedChange = { keepOn = it; app.setKeepConnected(it) }) },
+                colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.padding(top = 8.dp),
+            )
 
             Text(
                 stringResource(R.string.about), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(start = 8.dp, top = 20.dp, bottom = 8.dp),
             )
-            SettingRow(Icons.Rounded.Language, stringResource(R.string.language), supporting = stringResource(R.string.language_value))
+            SettingRow(
+                Icons.Rounded.Language, stringResource(R.string.language),
+                supporting = when (app.prefs.language) {
+                    "fa" -> stringResource(R.string.language_fa)
+                    "en" -> stringResource(R.string.language_en)
+                    "ru" -> stringResource(R.string.language_ru)
+                    else -> stringResource(R.string.language_system)
+                },
+                onClick = { pickLang = true },
+            )
             SettingRow(Icons.Rounded.Info, stringResource(R.string.app_name), supporting = stringResource(R.string.version_fmt, BuildConfig.VERSION_NAME))
             SettingRow(
                 Icons.AutoMirrored.Rounded.Logout, stringResource(R.string.logout), danger = true,
                 onClick = { confirmLogout = true },
             )
         }
+    }
+
+    if (pickLang) {
+        val options = listOf("" to R.string.language_system, "fa" to R.string.language_fa, "en" to R.string.language_en, "ru" to R.string.language_ru)
+        AlertDialog(
+            onDismissRequest = { pickLang = false },
+            title = { Text(stringResource(R.string.language_pick)) },
+            text = {
+                Column {
+                    options.forEach { (code, label) ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable {
+                                pickLang = false
+                                if (app.prefs.language != code) {
+                                    app.prefs.language = code
+                                    (ctx as? android.app.Activity)?.recreate()     // re-resolve strings + text direction
+                                }
+                            }.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = app.prefs.language == code, onClick = null)
+                            Text(stringResource(label), modifier = Modifier.padding(start = 12.dp))
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { pickLang = false }) { Text(stringResource(R.string.close)) } },
+        )
     }
 
     if (confirmLogout) {

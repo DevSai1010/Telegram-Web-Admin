@@ -19,14 +19,21 @@ The debug APK is signed with Android's debug key: fine for your own devices. A r
 ## Run on a computer instead
 Android Studio (Ladybug or newer) → *Open* this folder → *Run*. JDK 17.
 
-## What is in v0.1 (and what is not yet)
-In: sign-in, chat list (bot / Telegram views, filters, search, unread counters), conversation view (reversed list,
-day separators, M3 bubbles with the same corner rules as the web panel, reply quote → jump & flash, photo / sticker
-inline, jump-to-latest button with new-message count), send text (+ reply, "as me / as bot" in business chats),
-devices screen (rename · sign out · last activity), notification permission + battery-optimisation cards,
-connection bar (connecting / waiting for network / updating), offline cache.
-Not yet: voice / video / GIF playback, sending media, stickers panel, folders, search inside chats, jump-to-date,
-a background service + FCM push (messages arrive instantly while the app is open; closed-app delivery is the next step).
+## What is in v0.2 (and what is not yet)
+In: everything from v0.1 (sign-in, chat list with bot / Telegram views + filters + search + unread counters, conversation view with
+M3 bubbles, reply-quote jump & flash, jump-to-latest button, offline cache, devices screen, connection bar) **plus**
+- **Voice messages** play in the bubble (play / pause / seek); **video** and **GIF** open in a full-screen player (GIFs loop silently).
+- **Sending**: photo / video from the gallery, camera photo, any file (≤ 50 MB, streamed — never held in memory), and **voice notes**
+  (microphone permission asked only when you tap the mic; OGG/Opus on Android 10+, AAC before that — the server converts it).
+- **Notifications** for new customer messages while the app is not on screen; tapping one opens that chat.
+- **Always-on connection** (Settings, off by default): a small foreground service keeps the live connection with the app closed.
+- **Language** picker: system / فارسی / English / Русский (switches text direction too).
+Not yet: FCM push (needs a Firebase project — see below), opening / saving documents, the sticker panel and sending stickers, folders,
+search inside chats, jump-to-date, contacts names, release-signed builds.
+
+## FCM (push while the app is fully closed)
+Needs things only you can create: a Firebase project, `google-services.json` for package `com.msma.tgpanel`, and a service-account key
+stored as a Space secret. Until then "Always-on connection" is the way to receive messages with the app closed.
 
 ## Tests
 `gradle testDebugUnitTest` runs `LogicTest` (cache-merge rule, unread rule, back-off, bubble side, avatar colours).

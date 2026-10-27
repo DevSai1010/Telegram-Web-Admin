@@ -2,6 +2,12 @@
 
 package com.msma.tgpanel.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -41,10 +47,11 @@ import androidx.compose.material.icons.automirrored.rounded.Reply
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.PhotoCamera
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.InsertDriveFile
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,6 +59,7 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
@@ -69,6 +77,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -90,16 +99,20 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.msma.tgpanel.R
+import com.msma.tgpanel.VoiceRecorder
 import com.msma.tgpanel.core.Side
 import com.msma.tgpanel.core.groupsWithPrevious
 import com.msma.tgpanel.core.sideOf
 import com.msma.tgpanel.data.ApiResult
 import com.msma.tgpanel.data.ChatEntity
 import com.msma.tgpanel.data.MessageEntity
+import java.io.File
 import java.util.Calendar
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -242,6 +255,67 @@ fun ChatScreen(chatId: String, onBack: () -> Unit) {
         }
     }
 
+    // ---- attachments: gallery / camera / any file, and voice notes ----
+    val recorder = remember { VoiceRecorder(ctx) }
+    var recording by remember { mutableStateOf(false) }
+    var recordMs by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(recording) { while (recording) { recordMs = recorder.elapsedMs(); delay(200) } }
+    DisposableEffect(Unit) { onDispose { recorder.cancel() } }
+
+    fun failText(res: ApiResult.Err): String = when {
+        res.message == "file_too_big" -> ctx.getString(R.string.file_too_big)
+        res.code == 0 -> ctx.getString(R.string.err_network)
+        res.message.isNotEmpty() -> res.message
+        else -> ctx.getString(R.string.upload_failed)
+    }
+
+    fun sendUri(uri: Uri, kind: String? = null) {
+        val c = chat ?: return
+        if (sending) return
+        sending = true
+        val reply = replyTo
+        val caption = if (kind == null) draft.trim() else ""        // a caption only goes with files, not voice notes
+        scope.launch {
+            when (val res = app.repo.sendMedia(ctx, c, uri, kind, caption, senderMode, reply?.msgId)) {
+                is ApiResult.Ok -> { if (kind == null) draft = ""; replyTo = null; listState.animateScrollToItem(0) }
+                is ApiResult.Err -> snack.showSnackbar(failText(res))
+                else -> {}
+            }
+            sending = false
+        }
+    }
+
+    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) sendUri(uri) }
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) sendUri(uri) }
+    var cameraUri by remember { mutableStateOf<Uri?>(null) }
+    val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val u = cameraUri
+        if (ok && u != null) sendUri(u)
+    }
+
+    fun openCamera() {
+        val dir = File(ctx.cacheDir, "camera").apply { mkdirs() }
+        val photo = File(dir, "IMG_" + System.currentTimeMillis() + ".jpg")
+        val u = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", photo)
+        cameraUri = u
+        takePicture.launch(u)
+    }
+
+    fun startRecording() {
+        if (recorder.start()) recording = true else scope.launch { snack.showSnackbar(ctx.getString(R.string.record_failed)) }
+    }
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startRecording() else scope.launch { snack.showSnackbar(ctx.getString(R.string.mic_denied)) }
+    }
+    fun onMicTap() {
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startRecording()
+        else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+    fun finishRecording(send: Boolean) {
+        recording = false
+        if (send) recorder.stop()?.let { sendUri(Uri.fromFile(it), "voice") } else recorder.cancel()
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
         topBar = {
@@ -321,11 +395,17 @@ fun ChatScreen(chatId: String, onBack: () -> Unit) {
                     }
                 }
             }
+            if (sending) LinearProgressIndicator(Modifier.fillMaxWidth())
             Composer(
                 chat = chat, draft = draft, onDraft = { draft = it },
                 replyTo = replyTo, onCancelReply = { replyTo = null },
                 senderMode = senderMode, onSenderMode = { senderMode = it },
                 sending = sending, onSend = { send() },
+                recording = recording, recordMs = recordMs, onMic = { onMicTap() },
+                onCancelRecording = { finishRecording(false) }, onSendRecording = { finishRecording(true) },
+                onAttachGallery = { pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
+                onAttachCamera = { openCamera() },
+                onAttachFile = { pickFile.launch(arrayOf("*/*")) },
             )
         }
     }
@@ -474,25 +554,17 @@ private fun MediaBlock(m: MessageEntity) {
             Text(m.text, fontSize = 52.sp)                       // the sticker's emoji shows if the image format can't be decoded
             AsyncImage(model = request(), contentDescription = stringResource(R.string.media_sticker), contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
         }
+        "voice" -> VoiceBar(m.fileId)
+        "video" -> VideoTile(m.fileId, stringResource(R.string.media_video), loop = false)
+        "animation" -> VideoTile(m.fileId, stringResource(R.string.media_gif), loop = true)
         else -> {
-            val (icon, label) = when (m.type) {
-                "video" -> Icons.Rounded.PlayCircle to stringResource(R.string.media_video)
-                "animation" -> Icons.Rounded.PlayCircle to stringResource(R.string.media_gif)
-                "voice" -> Icons.Rounded.GraphicEq to stringResource(R.string.media_voice)
-                "document" -> Icons.Rounded.InsertDriveFile to stringResource(R.string.media_doc)
-                else -> Icons.Rounded.AttachFile to stringResource(R.string.media_doc)
-            }
+            // documents: a labelled chip (opening / saving files comes later)
             Row(
                 Modifier.padding(vertical = 4.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.12f)).padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(icon, null, Modifier.size(28.dp))
-                Column(Modifier.padding(start = 10.dp)) {
-                    Text(label, style = MaterialTheme.typography.labelLarge)
-                    if (m.type == "video" || m.type == "voice" || m.type == "animation") {
-                        Text(stringResource(R.string.media_soon), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 1.dp))
-                    }
-                }
+                Icon(Icons.Rounded.InsertDriveFile, null, Modifier.size(28.dp))
+                Text(stringResource(R.string.media_doc), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 10.dp))
             }
         }
     }
@@ -509,7 +581,16 @@ private fun Composer(
     onSenderMode: (String) -> Unit,
     sending: Boolean,
     onSend: () -> Unit,
+    recording: Boolean,
+    recordMs: Long,
+    onMic: () -> Unit,
+    onCancelRecording: () -> Unit,
+    onSendRecording: () -> Unit,
+    onAttachGallery: () -> Unit,
+    onAttachCamera: () -> Unit,
+    onAttachFile: () -> Unit,
 ) {
+    var attachMenu by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().imePadding().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
         // business chats can be answered "as me" or as the bot (same switch the web panel has)
         if (chat != null && chat.bizId.isNotEmpty()) {
@@ -537,25 +618,60 @@ private fun Composer(
                         }
                     }
                 }
-                Row(verticalAlignment = Alignment.Bottom) {
-                    TextField(
-                        value = draft, onValueChange = onDraft,
-                        placeholder = { Text(stringResource(R.string.type_message)) },
-                        maxLines = 5,
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, disabledContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, disabledIndicatorColor = Color.Transparent,
-                        ),
-                        modifier = Modifier.weight(1f),
-                    )
-                    AnimatedVisibility(
-                        visible = draft.isNotBlank(),
-                        enter = scaleIn() + fadeIn(),
-                        exit = scaleOut() + fadeOut(),
-                        modifier = Modifier.padding(4.dp),
-                    ) {
-                        FilledIconButton(onClick = onSend, enabled = !sending, modifier = Modifier.size(48.dp)) {
+                if (recording) {
+                    // recording bar: cancel · red dot + timer · send
+                    Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onCancelRecording) { Icon(Icons.Rounded.Close, stringResource(R.string.cancel), tint = MaterialTheme.colorScheme.error) }
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(MaterialTheme.colorScheme.error))
+                        Text(
+                            stringResource(R.string.recording) + "  " + (recordMs / 60000).toString() + ":" + ((recordMs / 1000) % 60).toString().padStart(2, '0'),
+                            modifier = Modifier.weight(1f).padding(horizontal = 10.dp), style = MaterialTheme.typography.bodyLarge,
+                        )
+                        FilledIconButton(onClick = onSendRecording, modifier = Modifier.size(48.dp)) {
                             Icon(Icons.AutoMirrored.Rounded.Send, stringResource(R.string.send))
+                        }
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Box(Modifier.padding(start = 4.dp, bottom = 4.dp)) {
+                            IconButton(onClick = { attachMenu = true }) { Icon(Icons.Rounded.AttachFile, stringResource(R.string.attach)) }
+                            DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.attach_gallery)) }, leadingIcon = { Icon(Icons.Rounded.Image, null) },
+                                    onClick = { attachMenu = false; onAttachGallery() },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.attach_camera)) }, leadingIcon = { Icon(Icons.Rounded.PhotoCamera, null) },
+                                    onClick = { attachMenu = false; onAttachCamera() },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.attach_file)) }, leadingIcon = { Icon(Icons.Rounded.InsertDriveFile, null) },
+                                    onClick = { attachMenu = false; onAttachFile() },
+                                )
+                            }
+                        }
+                        TextField(
+                            value = draft, onValueChange = onDraft,
+                            placeholder = { Text(stringResource(R.string.type_message)) },
+                            maxLines = 5,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, disabledContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, disabledIndicatorColor = Color.Transparent,
+                            ),
+                            modifier = Modifier.weight(1f),
+                        )
+                        // send when there is text, microphone when there is not (same morph as the web composer)
+                        Box(Modifier.padding(4.dp)) {
+                            AnimatedVisibility(visible = draft.isNotBlank(), enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
+                                FilledIconButton(onClick = onSend, enabled = !sending, modifier = Modifier.size(48.dp)) {
+                                    Icon(Icons.AutoMirrored.Rounded.Send, stringResource(R.string.send))
+                                }
+                            }
+                            AnimatedVisibility(visible = draft.isBlank(), enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
+                                IconButton(onClick = onMic, enabled = !sending, modifier = Modifier.size(48.dp)) {
+                                    Icon(Icons.Rounded.Mic, stringResource(R.string.record_voice))
+                                }
+                            }
                         }
                     }
                 }

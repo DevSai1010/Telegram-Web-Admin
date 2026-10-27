@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
@@ -45,7 +46,18 @@ fun AppRoot() {
 
 @Composable
 private fun MainFlow() {
+    val app = appOf()
     val stack = remember { mutableStateListOf<Screen>(Screen.Chats) }
+    val requested by app.openChatRequest.collectAsStateWithLifecycle()
+    LaunchedEffect(requested) {
+        val id = requested ?: return@LaunchedEffect
+        val top = stack.last()
+        if (!(top is Screen.Chat && top.id == id)) {
+            while (stack.size > 1) stack.removeAt(stack.lastIndex)
+            stack.add(Screen.Chat(id))
+        }
+        app.openChatRequest.value = null
+    }
     BackHandler(enabled = stack.size > 1) { stack.removeAt(stack.lastIndex) }     // (removeLast clashes with the JDK 21 method on old Android)
 
     // slide direction follows the reading direction, so "forward" feels the same in Persian and in English

@@ -2,12 +2,18 @@ package com.msma.tgpanel.data
 
 import com.msma.tgpanel.core.nextUnread
 import com.msma.tgpanel.core.sortKeyOf
+import android.content.ContentResolver
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 private const val PAGE = 100
+private const val MAX_UPLOAD = 50L * 1024 * 1024        // Telegram bots can upload up to 50 MB
 
 /** Local-first data access: the UI only ever reads Room; this class keeps Room in step with the server. */
 class Repo(private val prefs: Prefs, private val api: Api, private val db: PanelDb) {
@@ -18,6 +24,9 @@ class Repo(private val prefs: Prefs, private val api: Api, private val db: Panel
 
     /** The chat currently on screen (its unread counter stays 0 and its history is always refreshed). */
     val openChatId = MutableStateFlow<String?>(null)
+
+    /** Fires for every chat that just got a new incoming message while it was not on screen (muted chats excluded). */
+    val incoming = MutableSharedFlow<ChatEntity>(extraBufferCapacity = 16)
 
     val chats: Flow<List<ChatEntity>> get() = dao.observeChats()
     fun chat(id: String): Flow<ChatEntity?> = dao.observeChat(id)
@@ -47,6 +56,10 @@ class Repo(private val prefs: Prefs, private val api: Api, private val db: Panel
             )
         }
         dao.upsertChats(rows)
+        for (r in rows) {
+            val before = old[r.id]?.unread ?: 0
+            if (r.unread > before && !r.muted && r.id != open) incoming.tryEmit(r)
+        }
         val keep = rows.map { it.id }
         dao.deleteChatsNotIn(keep)
         dao.deleteMessagesOfChatsNotIn(keep)
@@ -88,6 +101,40 @@ class Repo(private val prefs: Prefs, private val api: Api, private val db: Panel
         val res = api.send(chat.id, text, senderMode, chat.bizId, replyToMsgId)
         if (res is ApiResult.Ok) loadNewest(chat.id, force = true)
         return res
+    }
+
+    /** Sends a picked file / camera photo / recorded voice note. [kind] is "voice" for recordings, otherwise derived from the MIME type. */
+    suspend fun sendMedia(
+        ctx: Context, chat: ChatEntity, uri: Uri, kind: String?, caption: String, senderMode: String, replyToMsgId: String?,
+    ): ApiResult<ApiAck> {
+        val (name, size) = describe(ctx.contentResolver, uri)
+        if (size > MAX_UPLOAD) return ApiResult.Err(413, "file_too_big")
+        val mime = ctx.contentResolver.getType(uri)
+            ?: if (kind == "voice") (if (name.endsWith(".ogg")) "audio/ogg" else "audio/mp4") else "application/octet-stream"   // the server converts non-OGG voice notes
+        val type = kind ?: when {
+            mime.startsWith("image/") && size <= 10L * 1024 * 1024 && mime != "image/gif" -> "photo"   // Telegram photos cap at 10 MB
+            mime.startsWith("video/") -> "video"
+            else -> "document"
+        }
+        val res = api.sendMedia(ctx, uri, name, mime, size, type, chat.id, caption, if (chat.bizId.isNotEmpty()) senderMode else "bot", chat.bizId, replyToMsgId)
+        if (res is ApiResult.Ok) loadNewest(chat.id, force = true)
+        return res
+    }
+
+    private fun describe(resolver: ContentResolver, uri: Uri): Pair<String, Long> {
+        var name = uri.lastPathSegment ?: "file"
+        var size = -1L
+        if (uri.scheme == "content") {
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    c.getColumnIndex(OpenableColumns.DISPLAY_NAME).takeIf { it >= 0 }?.let { name = c.getString(it) ?: name }
+                    c.getColumnIndex(OpenableColumns.SIZE).takeIf { it >= 0 && !c.isNull(it) }?.let { size = c.getLong(it) }
+                }
+            }
+        } else if (uri.scheme == "file") {
+            uri.path?.let { java.io.File(it) }?.let { name = it.name; size = it.length() }
+        }
+        return name to size
     }
 
     // ---- staying in step (docs/API.md §3) ----

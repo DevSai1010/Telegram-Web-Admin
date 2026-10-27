@@ -51,7 +51,6 @@
     <string name="media_sticker">استیکر</string>
     <string name="media_gif">گیف</string>
     <string name="media_doc">فایل</string>
-    <string name="media_soon">پخش در نسخه‌ی بعدی اپ</string>
     <string name="role_owner">🧑 (من)</string>
     <string name="role_admin">🖥 (پنل)</string>
     <string name="role_model">🤖 (هوش مصنوعی)</string>
@@ -93,5 +92,27 @@
     <string name="about">درباره</string>
     <string name="version_fmt">نسخه %1$s</string>
     <string name="language">زبان</string>
-    <string name="language_value">طبق زبان سیستم (فارسی، English، Русский)</string>
+    <string name="ch_messages">پیام‌های جدید</string>
+    <string name="ch_service">اتصال زنده</string>
+    <string name="service_title">پنل تلگرام متصل است</string>
+    <string name="service_text">دریافت فوری پیام‌ها فعال است</string>
+    <string name="keep_title">اتصال همیشه‌روشن</string>
+    <string name="keep_body">اگر روشن باشد، اپ در پس‌زمینه هم به پنل وصل می‌ماند و پیام‌های تازه را با اعلان نشان می‌دهد. اندروید یک اعلان دائمی کوچک نشان می‌دهد و کمی باتری بیشتری مصرف می‌شود.</string>
+    <string name="attach">پیوست</string>
+    <string name="attach_gallery">عکس یا ویدیو</string>
+    <string name="attach_camera">دوربین</string>
+    <string name="attach_file">فایل</string>
+    <string name="record_voice">ضبط پیام صوتی</string>
+    <string name="recording">در حال ضبط…</string>
+    <string name="mic_denied">برای ضبط صدا اجازه‌ی میکروفون لازم است.</string>
+    <string name="record_failed">ضبط صدا شروع نشد</string>
+    <string name="upload_failed">ارسال فایل انجام نشد</string>
+    <string name="file_too_big">حجم فایل بیش از ۵۰ مگابایت است و ارسال نمی‌شود.</string>
+    <string name="play">پخش</string>
+    <string name="pause">توقف</string>
+    <string name="language_pick">انتخاب زبان</string>
+    <string name="language_system">زبان سیستم</string>
+    <string name="language_fa">فارسی</string>
+    <string name="language_en">English</string>
+    <string name="language_ru">Русский</string>
 </resources>
