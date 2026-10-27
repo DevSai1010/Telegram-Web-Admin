@@ -17,7 +17,7 @@ fun sortKeyOf(id: String): Long = id.toLongOrNull() ?: 0L
 
 /**
  * Which locally cached message ids a freshly fetched page proves were deleted (API.md "merging rule").
- *  - The page covers the inclusive range from `first` through `last`; local rows inside that range that are missing from the page were deleted.
+ *  - The page covers [first..last]; local rows inside that range that are missing from the page were deleted.
  *  - [newest] = this is the newest page, so its range is open upward: local rows newer than `last`
  *    that the server no longer has are gone too.
  *  - Rows OLDER than the page are never touched: the server keeps history only for a while, so "not on
