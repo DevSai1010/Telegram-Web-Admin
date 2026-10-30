@@ -43,6 +43,20 @@ class Prefs(ctx: Context) {
         get() = sp.getString("lang", "") ?: ""
         set(v) = sp.edit().putString("lang", v).apply()
 
+    /** "emoji:count,emoji:count" — how often each reaction / emoji was used, so the most-used come first (same idea as the web panel). */
+    var emojiUsage: String
+        get() = sp.getString("emoji_usage", "") ?: ""
+        set(v) = sp.edit().putString("emoji_usage", v).apply()
+
+    fun usageCounts(): Map<String, Int> =
+        emojiUsage.split(',').mapNotNull { p -> p.split(':').takeIf { it.size == 2 }?.let { it[0] to (it[1].toIntOrNull() ?: 0) } }.toMap()
+
+    fun bumpEmoji(e: String) {
+        val m = usageCounts().toMutableMap()
+        m[e] = (m[e] ?: 0) + 1
+        emojiUsage = m.entries.sortedByDescending { it.value }.take(60).joinToString(",") { it.key + ":" + it.value }
+    }
+
     val loggedIn: Boolean get() = token.isNotEmpty()
 
     /** Sign out locally: forget the session and every sync marker (the DB is cleared by App.logout). */

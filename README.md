@@ -19,17 +19,24 @@ The debug APK is signed with Android's debug key: fine for your own devices. A r
 ## Run on a computer instead
 Android Studio (Ladybug or newer) → *Open* this folder → *Run*. JDK 17.
 
-## What is in v0.2 (and what is not yet)
-In: everything from v0.1 (sign-in, chat list with bot / Telegram views + filters + search + unread counters, conversation view with
-M3 bubbles, reply-quote jump & flash, jump-to-latest button, offline cache, devices screen, connection bar) **plus**
-- **Voice messages** play in the bubble (play / pause / seek); **video** and **GIF** open in a full-screen player (GIFs loop silently).
-- **Sending**: photo / video from the gallery, camera photo, any file (≤ 50 MB, streamed — never held in memory), and **voice notes**
-  (microphone permission asked only when you tap the mic; OGG/Opus on Android 10+, AAC before that — the server converts it).
-- **Notifications** for new customer messages while the app is not on screen; tapping one opens that chat.
-- **Always-on connection** (Settings, off by default): a small foreground service keeps the live connection with the app closed.
-- **Language** picker: system / فارسی / English / Русский (switches text direction too).
-Not yet: FCM push (needs a Firebase project — see below), opening / saving documents, the sticker panel and sending stickers, folders,
-search inside chats, jump-to-date, contacts names, release-signed builds.
+## What is in v0.3 — the screens now follow the web panel
+The sign-in card, chat list, chat screen, composer, message menu and profile sheet were rebuilt from the web panel's own markup / CSS
+(sizes, radii, colours, wording, order of controls), with the same Persian texts.
+
+- **Sign-in** — one card: brand mark, title, hint line, centred fields, button, *Forgot password* (temporary password sent to Telegram) and the
+  *choose a new password* step after a temporary-password sign-in; suspended-account banner. The server address is behind a small link.
+- **Chat list** — pill search bar with the menu button, connection pill, two-segment bot / Telegram switch with unread badges, filter chips with
+  counts, rows (52 dp avatar, pin / mute / business / AI-pending marks, unread badge), pencil FAB + *New chat* dialog (id or @username + first message).
+- **Chat** — 64 dp top bar (back · avatar · title · id; tap = profile), bubbles with the web's corner rules, swipe-to-reply, long-press menu
+  (six most-used reactions + expand, reply, edit, copy, add to panel, forward, pin in groups, delete), reaction chips under the bubble,
+  jump-to-latest button with count.
+- **Composer** — attach · emoji · sticker · text · mic↔send in one 28 dp container; attach menu (photo, video, GIF, file, + camera); emoji panel with the
+  web's own 8 categories; sticker panel (recent + the packs from settings) and GIF tab; reply strip; voice recording bar.
+- **Profile sheet** — photo, id / name / username / bio, shared-media tabs (photos, videos, voice, files), pin · mute · AI panel · delete, per-chat AI settings.
+
+Also: voice / video / GIF playback, media sending, notifications, always-on connection, language picker, devices screen.
+Not yet matched to the web: the AI / panel / bot-profile / users settings pages, group info (members, moderation), GIF previews in the panel
+(tiles show a play icon), animated (.tgs / .webm) stickers (the emoji is shown instead), opening / saving documents, FCM.
 
 ## FCM (push while the app is fully closed)
 Needs things only you can create: a Firebase project, `google-services.json` for package `com.msma.tgpanel`, and a service-account key

@@ -96,7 +96,7 @@ fun VideoTile(fileId: String, label: String, loop: Boolean) {
 }
 
 @Composable
-private fun VideoDialog(fileId: String, loop: Boolean, onDismiss: () -> Unit) {
+fun VideoDialog(fileId: String, loop: Boolean, onDismiss: () -> Unit) {
     val app = appOf()
     val exo = remember {
         app.media.newPlayer().apply {

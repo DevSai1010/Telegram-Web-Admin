@@ -111,8 +111,10 @@ class Repo(private val prefs: Prefs, private val api: Api, private val db: Panel
         if (size > MAX_UPLOAD) return ApiResult.Err(413, "file_too_big")
         val mime = ctx.contentResolver.getType(uri)
             ?: if (kind == "voice") (if (name.endsWith(".ogg")) "audio/ogg" else "audio/mp4") else "application/octet-stream"   // the server converts non-OGG voice notes
-        val type = kind ?: when {
-            mime.startsWith("image/") && size <= 10L * 1024 * 1024 && mime != "image/gif" -> "photo"   // Telegram photos cap at 10 MB
+        val type = when {
+            kind == "photo" && size > 10L * 1024 * 1024 -> "document"        // Telegram photos cap at 10 MB — send the original as a file
+            kind != null -> kind
+            mime.startsWith("image/") && size <= 10L * 1024 * 1024 && mime != "image/gif" -> "photo"
             mime.startsWith("video/") -> "video"
             else -> "document"
         }
@@ -136,6 +138,31 @@ class Repo(private val prefs: Prefs, private val api: Api, private val db: Panel
         }
         return name to size
     }
+
+    // ---- actions: each one asks the server, then refreshes what it touched so the UI updates at once ----
+    private suspend fun <T> afterMessageChange(chatId: String, res: ApiResult<T>): ApiResult<T> {
+        if (res is ApiResult.Ok) loadNewest(chatId, force = true)
+        return res
+    }
+
+    private suspend fun <T> afterChatChange(res: ApiResult<T>): ApiResult<T> {
+        if (res is ApiResult.Ok) refreshChats(force = true)
+        return res
+    }
+
+    suspend fun startChat(id: String, text: String): ApiResult<ApiAck> =
+        afterChatChange(api.send(id.trim().removePrefix("@"), text, "bot", "", null, "مخاطب " + id.trim()))
+
+    suspend fun react(chatId: String, msgId: String, emoji: String?) = afterMessageChange(chatId, api.react(chatId, msgId, emoji))
+    suspend fun edit(m: MessageEntity, text: String) = afterMessageChange(m.chatId, api.editMessage(m.chatId, m.msgId, m.id, text))
+    suspend fun deleteMessage(m: MessageEntity) = afterMessageChange(m.chatId, api.deleteMessage(m.chatId, m.msgId))
+    suspend fun pinMessage(chat: ChatEntity, m: MessageEntity) = api.pinMessage(chat.id, m.msgId, chat.bizId)
+    suspend fun forward(chat: ChatEntity, m: MessageEntity, toChatId: String) = api.forward(chat.id, toChatId.trim(), m.msgId, chat.bizId)
+    suspend fun pinChat(chatId: String, pinned: Boolean) = afterChatChange(api.pinChat(chatId, pinned))
+    suspend fun muteChat(chatId: String, muted: Boolean) = afterChatChange(api.muteChat(chatId, muted))
+    suspend fun deleteChat(chatId: String) = afterChatChange(api.deleteChat(chatId))
+    suspend fun sendSticker(chat: ChatEntity, fileId: String, kind: String, emoji: String, senderMode: String, replyToMsgId: String?) =
+        afterMessageChange(chat.id, api.sendSticker(chat.id, fileId, kind, emoji, if (chat.bizId.isNotEmpty()) senderMode else "bot", chat.bizId, replyToMsgId))
 
     // ---- staying in step (docs/API.md §3) ----
     /** Asks the server what changed since our cursor and refreshes only that. Safe to call any time, any number of times. */

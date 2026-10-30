@@ -56,10 +56,12 @@ class Api(private val prefs: Prefs) {
         json: String? = null,
         etag: String? = null,
         auth: Boolean = true,
+        tokenOverride: String? = null,
     ): RawResponse? = withContext(Dispatchers.IO) {
         try {
             val rb = Request.Builder().url(prefs.baseUrl + path)
-            if (auth && prefs.token.isNotEmpty()) rb.header("Authorization", "Bearer " + prefs.token)
+            val tok = tokenOverride ?: prefs.token
+            if (auth && tok.isNotEmpty()) rb.header("Authorization", "Bearer " + tok)
             if (etag != null) rb.header("If-None-Match", etag)
             val body = if (method == "GET") null else (json ?: "").toRequestBody(jsonType)
             rb.method(method, body)
@@ -114,6 +116,15 @@ class Api(private val prefs: Prefs) {
 
     suspend fun logout() { exec("/api/logout", "POST") }
 
+    /** "Forgot password": the server sends a one-time password to the account's Telegram. */
+    suspend fun requestReset(username: String): ApiResult<ApiAck> = postAck("/api/request-password-reset", mapOf("username" to JsonPrimitive(username)), auth = false)
+
+    /** Choosing a permanent password after signing in with a temporary one ([token] is that session's token). */
+    suspend fun changePassword(token: String, newPassword: String): ApiResult<LoginResp> {
+        val body = AppJson.encodeToString(JsonObject.serializer(), JsonObject(mapOf("newPassword" to JsonPrimitive(newPassword))))
+        return typed(exec("/api/change-password", "POST", body, tokenOverride = token))
+    }
+
     // ---- reading ----
     suspend fun chats(etag: String?): Pair<ApiResult<List<ChatDto>>, String?> {
         val r = exec("/api/chats", etag = etag)
@@ -132,13 +143,16 @@ class Api(private val prefs: Prefs) {
     suspend fun sync(cursor: String): ApiResult<SyncDto> = typed(exec("/api/sync?cursor=${enc(cursor)}"))
 
     // ---- writing ----
-    suspend fun send(chatId: String, text: String, senderMode: String, businessConnectionId: String, replyToMsgId: String?): ApiResult<ApiAck> {
+    suspend fun send(
+        chatId: String, text: String, senderMode: String, businessConnectionId: String, replyToMsgId: String?, customTitle: String? = null,
+    ): ApiResult<ApiAck> {
         val m = mutableMapOf<String, JsonElement>(
             "chatId" to JsonPrimitive(chatId),
             "text" to JsonPrimitive(text),
             "senderMode" to JsonPrimitive(senderMode),
             "businessConnectionId" to JsonPrimitive(businessConnectionId.ifEmpty { null }),
         )
+        if (customTitle != null) m["customTitle"] = JsonPrimitive(customTitle)
         val rid = replyToMsgId?.takeIf { it.isNotEmpty() }
         if (rid != null) m["replyToMsgId"] = rid.toLongOrNull()?.let { JsonPrimitive(it) } ?: JsonPrimitive(rid)
         val r = exec("/api/send", "POST", AppJson.encodeToString(JsonObject.serializer(), JsonObject(m)))
@@ -178,6 +192,63 @@ class Api(private val prefs: Prefs) {
             ApiResult.Err(0)
         }
     }
+
+    // ---- message / chat actions (same endpoints the web panel uses) ----
+    private suspend fun postAck(path: String, body: Map<String, JsonElement>, method: String = "POST", auth: Boolean = true): ApiResult<ApiAck> {
+        val r = exec(path, method, AppJson.encodeToString(JsonObject.serializer(), JsonObject(body)), auth = auth)
+        if (r == null || r.code !in 200..299) return failure(r)
+        val ack = parse<ApiAck>(r.body) ?: return ApiResult.Err(r.code, "bad response")
+        return if (ack.error.isNotEmpty()) ApiResult.Err(r.code, ack.error) else ApiResult.Ok(ack)
+    }
+
+    private fun idValue(s: String): JsonElement = s.toLongOrNull()?.let { JsonPrimitive(it) } ?: JsonPrimitive(s)
+
+    suspend fun react(chatId: String, msgId: String, emoji: String?) =
+        postAck("/api/react", mapOf("chatId" to JsonPrimitive(chatId), "msgId" to idValue(msgId), "emoji" to JsonPrimitive(emoji)))
+
+    suspend fun editMessage(chatId: String, msgId: String, internalId: String, text: String) =
+        postAck("/api/edit", mapOf("chatId" to JsonPrimitive(chatId), "msgId" to idValue(msgId), "id" to JsonPrimitive(internalId), "text" to JsonPrimitive(text)))
+
+    suspend fun deleteMessage(chatId: String, msgId: String) =
+        postAck("/api/delete-message", mapOf("chatId" to JsonPrimitive(chatId), "msgId" to idValue(msgId)))
+
+    suspend fun forward(fromChatId: String, toChatId: String, msgId: String, businessConnectionId: String) =
+        postAck("/api/forward", mapOf(
+            "fromChatId" to JsonPrimitive(fromChatId), "toChatId" to JsonPrimitive(toChatId), "msgId" to idValue(msgId),
+            "businessConnectionId" to JsonPrimitive(businessConnectionId.ifEmpty { null }),
+        ))
+
+    suspend fun pinMessage(chatId: String, msgId: String, businessConnectionId: String) =
+        postAck("/api/pin-message", mapOf(
+            "chatId" to JsonPrimitive(chatId), "msgId" to idValue(msgId), "businessConnectionId" to JsonPrimitive(businessConnectionId.ifEmpty { null }),
+        ))
+
+    suspend fun pinChat(chatId: String, pinned: Boolean) = postAck("/api/pin", mapOf("chatId" to JsonPrimitive(chatId), "pinned" to JsonPrimitive(pinned)))
+    suspend fun muteChat(chatId: String, muted: Boolean) = postAck("/api/mute", mapOf("chatId" to JsonPrimitive(chatId), "muted" to JsonPrimitive(muted)))
+    suspend fun deleteChat(chatId: String) = postAck("/api/delete-chat", mapOf("chatId" to JsonPrimitive(chatId)))
+
+    suspend fun chatSettings(chatId: String): ApiResult<ChatCfgDto> = typed(exec("/api/chat-settings?id=${enc(chatId)}"))
+    suspend fun saveChatSettings(chatId: String, aiMode: Boolean, prompt: String) =
+        postAck("/api/chat-settings", mapOf("chatId" to JsonPrimitive(chatId), "ai_mode" to JsonPrimitive(aiMode), "system_prompt" to JsonPrimitive(prompt)))
+
+    suspend fun profile(chatId: String): ApiResult<ProfileDto> = typed(exec("/api/user-profile?id=${enc(chatId)}"))
+    suspend fun chatMedia(chatId: String): ApiResult<ChatMediaDto> = typed(exec("/api/chat-media?id=${enc(chatId)}"))
+
+    // ---- stickers / GIFs ----
+    suspend fun recentMedia(kind: String): ApiResult<List<StickerDto>> = typed(exec("/api/recent-media?type=${enc(kind)}"))
+    suspend fun stickerPacks(): ApiResult<SettingsDto> = typed(exec("/api/settings"))
+    suspend fun stickerSet(name: String): ApiResult<StickerSetDto> = typed(exec("/api/sticker-set?name=${enc(name)}"))
+
+    suspend fun addRecent(fileId: String, kind: String, emoji: String) =
+        postAck("/api/add-recent-media", mapOf("fileId" to JsonPrimitive(fileId), "type" to JsonPrimitive(kind), "emoji" to JsonPrimitive(emoji)))
+
+    suspend fun sendSticker(chatId: String, fileId: String, kind: String, emoji: String, senderMode: String, businessConnectionId: String, replyToMsgId: String?) =
+        postAck("/api/send-sticker", buildMap {
+            put("chatId", JsonPrimitive(chatId)); put("fileId", JsonPrimitive(fileId)); put("type", JsonPrimitive(kind))
+            put("senderMode", JsonPrimitive(senderMode)); put("emoji", JsonPrimitive(emoji))
+            put("businessConnectionId", JsonPrimitive(businessConnectionId.ifEmpty { null }))
+            if (!replyToMsgId.isNullOrEmpty()) put("replyToMsgId", idValue(replyToMsgId))
+        })
 
     // ---- devices ----
     suspend fun sessions(): ApiResult<List<SessionDto>> = typed(exec("/api/sessions"))

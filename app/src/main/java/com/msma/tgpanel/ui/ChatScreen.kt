@@ -9,54 +9,39 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.Reply
-import androidx.compose.material.icons.automirrored.rounded.Send
-import androidx.compose.material.icons.rounded.AttachFile
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.PhotoCamera
-import androidx.compose.material.icons.rounded.Image
-import androidx.compose.material.icons.rounded.InsertDriveFile
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -67,10 +52,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -87,30 +70,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawOutline
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.msma.tgpanel.R
 import com.msma.tgpanel.VoiceRecorder
-import com.msma.tgpanel.core.Side
 import com.msma.tgpanel.core.groupsWithPrevious
-import com.msma.tgpanel.core.sideOf
 import com.msma.tgpanel.data.ApiResult
-import com.msma.tgpanel.data.ChatEntity
 import com.msma.tgpanel.data.MessageEntity
 import java.io.File
 import java.util.Calendar
@@ -169,6 +141,10 @@ fun ChatScreen(chatId: String, onBack: () -> Unit) {
     var senderMode by rememberSaveable { mutableStateOf("bot") }
     var draft by rememberSaveable { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
+    var profileOpen by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<MessageEntity?>(null) }
+    var deleting by remember { mutableStateOf<MessageEntity?>(null) }
+    var forwarding by remember { mutableStateOf<MessageEntity?>(null) }
 
     // ---- bookkeeping: this chat is "open" (so it never counts unread) and gets a fresh newest page ----
     DisposableEffect(chatId) {
@@ -207,9 +183,7 @@ fun ChatScreen(chatId: String, onBack: () -> Unit) {
     // ---- tap on a reply preview → scroll to the original and flash it (pages back through history if needed) ----
     fun targetIndex(m: MessageEntity): Int {
         val list = rowsNow
-        if (m.replyToMsgId.isNotEmpty()) {
-            return list.indexOfFirst { it is ChatRowItem.Msg && it.m.msgId == m.replyToMsgId }
-        }
+        if (m.replyToMsgId.isNotEmpty()) return list.indexOfFirst { it is ChatRowItem.Msg && it.m.msgId == m.replyToMsgId }
         // old rows saved without an id: preview is "<name>: <text>" — match the text, only among EARLIER messages
         val ptxt = m.replyPreview.substringAfter(':', "").trimStart()
         if (ptxt.isEmpty()) return -1
@@ -238,6 +212,24 @@ fun ChatScreen(chatId: String, onBack: () -> Unit) {
         }
     }
 
+    fun errText(r: ApiResult.Err): String = when {
+        r.message == "file_too_big" -> ctx.getString(R.string.file_too_big)
+        r.code == 0 -> ctx.getString(R.string.err_network)
+        r.message.isNotEmpty() -> r.message
+        else -> ctx.getString(R.string.err_generic)
+    }
+
+    /** Runs a server action; a failure becomes a snackbar, success needs no message (the list refreshes itself). */
+    fun act(okText: Int? = null, block: suspend () -> ApiResult<*>) {
+        scope.launch {
+            when (val r = block()) {
+                is ApiResult.Err -> snack.showSnackbar(errText(r))
+                is ApiResult.Ok -> if (okText != null) snack.showSnackbar(ctx.getString(okText))
+                else -> {}
+            }
+        }
+    }
+
     fun send() {
         val text = draft.trim()
         val c = chat
@@ -245,60 +237,62 @@ fun ChatScreen(chatId: String, onBack: () -> Unit) {
         sending = true
         val reply = replyTo
         scope.launch {
-            val res = app.repo.send(c, text, if (c.bizId.isNotEmpty()) senderMode else "bot", reply?.msgId)
-            when (res) {
+            when (val res = app.repo.send(c, text, if (c.bizId.isNotEmpty()) senderMode else "bot", reply?.msgId)) {
                 is ApiResult.Ok -> { draft = ""; replyTo = null; listState.animateScrollToItem(0) }
-                is ApiResult.Err -> snack.showSnackbar(res.message.ifEmpty { ctx.getString(R.string.err_generic) })
+                is ApiResult.Err -> snack.showSnackbar(errText(res))
                 else -> {}
             }
             sending = false
         }
     }
 
-    // ---- attachments: gallery / camera / any file, and voice notes ----
+    // ---- attachments: gallery / video / GIF / file / camera, and voice notes ----
     val recorder = remember { VoiceRecorder(ctx) }
     var recording by remember { mutableStateOf(false) }
     var recordMs by remember { mutableLongStateOf(0L) }
     LaunchedEffect(recording) { while (recording) { recordMs = recorder.elapsedMs(); delay(200) } }
     DisposableEffect(Unit) { onDispose { recorder.cancel() } }
 
-    fun failText(res: ApiResult.Err): String = when {
-        res.message == "file_too_big" -> ctx.getString(R.string.file_too_big)
-        res.code == 0 -> ctx.getString(R.string.err_network)
-        res.message.isNotEmpty() -> res.message
-        else -> ctx.getString(R.string.upload_failed)
-    }
-
-    fun sendUri(uri: Uri, kind: String? = null) {
+    fun sendUri(uri: Uri, kind: String) {
         val c = chat ?: return
         if (sending) return
         sending = true
         val reply = replyTo
-        val caption = if (kind == null) draft.trim() else ""        // a caption only goes with files, not voice notes
+        val caption = if (kind == "voice") "" else draft.trim()        // a caption goes with files, not with voice notes
         scope.launch {
             when (val res = app.repo.sendMedia(ctx, c, uri, kind, caption, senderMode, reply?.msgId)) {
-                is ApiResult.Ok -> { if (kind == null) draft = ""; replyTo = null; listState.animateScrollToItem(0) }
-                is ApiResult.Err -> snack.showSnackbar(failText(res))
+                is ApiResult.Ok -> { if (kind != "voice") draft = ""; replyTo = null; listState.animateScrollToItem(0) }
+                is ApiResult.Err -> snack.showSnackbar(errText(res))
                 else -> {}
             }
             sending = false
         }
     }
 
-    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) sendUri(uri) }
-    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) sendUri(uri) }
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) sendUri(uri, "photo") }
+    val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) sendUri(uri, "video") }
+    val pickGif = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) sendUri(uri, "animation") }
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) sendUri(uri, "document") }
     var cameraUri by remember { mutableStateOf<Uri?>(null) }
     val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val u = cameraUri
-        if (ok && u != null) sendUri(u)
+        if (ok && u != null) sendUri(u, "photo")
     }
 
-    fun openCamera() {
-        val dir = File(ctx.cacheDir, "camera").apply { mkdirs() }
-        val photo = File(dir, "IMG_" + System.currentTimeMillis() + ".jpg")
-        val u = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", photo)
-        cameraUri = u
-        takePicture.launch(u)
+    fun attach(kind: AttachKind) {
+        when (kind) {
+            AttachKind.Photo -> pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            AttachKind.Video -> pickVideo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+            AttachKind.Gif -> pickGif.launch(arrayOf("image/gif", "video/mp4"))
+            AttachKind.File -> pickFile.launch(arrayOf("*/*"))
+            AttachKind.Camera -> {
+                val dir = File(ctx.cacheDir, "camera").apply { mkdirs() }
+                val photo = File(dir, "IMG_" + System.currentTimeMillis() + ".jpg")
+                val u = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", photo)
+                cameraUri = u
+                takePicture.launch(u)
+            }
+        }
     }
 
     fun startRecording() {
@@ -318,28 +312,8 @@ fun ChatScreen(chatId: String, onBack: () -> Unit) {
 
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.back)) }
-                },
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Avatar(chatId, chat?.title.orEmpty(), 40.dp)
-                        Column(Modifier.padding(start = 12.dp)) {
-                            Text(chat?.title.orEmpty().ifEmpty { chatId }, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(
-                                if (chat?.aiPending == true) stringResource(R.string.ai_pending) else stringResource(R.string.chat_id_fmt, chatId),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (chat?.aiPending == true) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                },
-            )
-        },
+        topBar = { ChatTopBar(chatId, chat?.title.orEmpty(), chat?.aiPending == true, onBack = onBack, onProfile = { profileOpen = true }) },
+        containerColor = MaterialTheme.colorScheme.surface,
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             ConnectionBanner(conn)
@@ -348,27 +322,35 @@ fun ChatScreen(chatId: String, onBack: () -> Unit) {
                     state = listState,
                     reverseLayout = true,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     items(rows, key = { r -> if (r is ChatRowItem.Msg) "m" + r.m.id else (r as ChatRowItem.Day).key }) { r ->
                         when (r) {
                             is ChatRowItem.Day -> DaySeparator(r.ts)
                             is ChatRowItem.Msg -> {
-                                // the row *above* this one in time is the next index in the reversed list
+                                val m = r.m
                                 MessageBubble(
-                                    m = r.m,
-                                    contPrev = r.contPrev,
-                                    showSender = chat?.isGroup == true,
-                                    flash = flashId == r.m.id,
-                                    onReplyQuoteClick = { jumpToOriginal(r.m) },
-                                    onReply = { if (r.m.msgId.isNotEmpty()) replyTo = r.m },
+                                    m = m, contPrev = r.contPrev, showSender = chat?.isGroup == true, isGroup = chat?.isGroup == true, flash = flashId == m.id,
+                                    actions = BubbleActions(
+                                        onReplyQuote = { jumpToOriginal(m) },
+                                        onReply = { if (m.msgId.isNotEmpty()) replyTo = m },
+                                        onReact = { e ->
+                                            app.prefs.bumpEmoji(e)
+                                            act { app.repo.react(chatId, m.msgId, if (m.myReaction == e) null else e) }
+                                        },
+                                        onEdit = { editing = m },
+                                        onForward = { forwarding = m },
+                                        onPin = { chat?.let { c -> act(R.string.saved) { app.repo.pinMessage(c, m) } } },
+                                        onDelete = { deleting = m },
+                                        onAddToPanel = { act(R.string.saved) { app.api.addRecent(m.fileId, m.type, m.text) } },
+                                    ),
                                 )
                             }
                         }
                     }
                 }
-                // jump to latest (small FAB) + count of messages that arrived while scrolled away
+                // .scroll-btn: small FAB, count badge when messages arrived while scrolled away
                 androidx.compose.animation.AnimatedVisibility(
                     visible = !atBottom,
                     enter = scaleIn() + fadeIn(),
@@ -382,10 +364,7 @@ fun ChatScreen(chatId: String, onBack: () -> Unit) {
                             contentColor = MaterialTheme.colorScheme.primary,
                         ) { Icon(Icons.Rounded.KeyboardArrowDown, stringResource(R.string.jump_latest)) }
                         if (newAway > 0) {
-                            Surface(
-                                shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.align(Alignment.TopEnd).widthIn(min = 20.dp),
-                            ) {
+                            Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary, modifier = Modifier.align(Alignment.TopEnd).widthIn(min = 20.dp)) {
                                 Text(
                                     if (newAway > 99) "99+" else newAway.toString(), modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
                                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary,
@@ -403,18 +382,104 @@ fun ChatScreen(chatId: String, onBack: () -> Unit) {
                 sending = sending, onSend = { send() },
                 recording = recording, recordMs = recordMs, onMic = { onMicTap() },
                 onCancelRecording = { finishRecording(false) }, onSendRecording = { finishRecording(true) },
-                onAttachGallery = { pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
-                onAttachCamera = { openCamera() },
-                onAttachFile = { pickFile.launch(arrayOf("*/*")) },
+                onAttach = { attach(it) },
+                onSticker = { fileId, kind, emoji ->
+                    val c = chat
+                    if (c != null) {
+                        val reply = replyTo
+                        replyTo = null
+                        act { app.repo.sendSticker(c, fileId, kind, emoji, senderMode, reply?.msgId) }
+                    }
+                },
             )
+        }
+    }
+
+    // ---- dialogs ----
+    editing?.let { m ->
+        var text by remember(m.id) { mutableStateOf(m.text) }
+        AlertDialog(
+            onDismissRequest = { editing = null },
+            title = { Text(stringResource(R.string.edit_title)) },
+            text = { TextField(text, { text = it }, modifier = Modifier.fillMaxWidth(), minLines = 2) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val t = text.trim()
+                    editing = null
+                    if (t.isNotEmpty() && t != m.text) act(R.string.saved) { app.repo.edit(m, t) }
+                }) { Text(stringResource(R.string.save)) }
+            },
+            dismissButton = { TextButton(onClick = { editing = null }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
+    deleting?.let { m ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            text = { Text(stringResource(R.string.delete_confirm)) },
+            confirmButton = {
+                TextButton(onClick = { deleting = null; act { app.repo.deleteMessage(m) } }) {
+                    Text(stringResource(R.string.ctx_delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
+    forwarding?.let { m ->
+        var target by remember(m.id) { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { forwarding = null },
+            title = { Text(stringResource(R.string.ctx_forward)) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.forward_prompt), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+                    TextField(target, { target = it }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val to = target.trim()
+                    forwarding = null
+                    val c = chat
+                    if (to.isNotEmpty() && c != null) act(R.string.forwarded) { app.repo.forward(c, m, to) }
+                }) { Text(stringResource(R.string.ctx_forward)) }
+            },
+            dismissButton = { TextButton(onClick = { forwarding = null }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
+    if (profileOpen) ProfileSheet(chatId = chatId, onDismiss = { profileOpen = false }, onChatDeleted = { profileOpen = false; onBack() })
+}
+
+/** .chat-topbar — 64 dp, surfaceContainer; the back button, avatar and title are one tap target that opens the profile. */
+@Composable
+private fun ChatTopBar(chatId: String, title: String, aiPending: Boolean, onBack: () -> Unit, onProfile: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.statusBarsPadding().height(64.dp).padding(start = 8.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.back), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Row(
+                Modifier.weight(1f).padding(start = 4.dp).clip16().clickable(onClick = onProfile).padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Avatar(chatId, title, 40.dp)
+                Column(Modifier.padding(start = 12.dp)) {
+                    Text(title.ifEmpty { chatId }, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (aiPending) {
+                        val a by rememberInfiniteTransition(label = "pend").animateFloat(0.35f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "pendAlpha")
+                        Text(stringResource(R.string.ai_pending), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary, modifier = Modifier.alpha(a), maxLines = 1)
+                    } else {
+                        Text(stringResource(R.string.chat_id_fmt, chatId), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    }
+                }
+            }
         }
     }
 }
 
+private fun Modifier.clip16() = this.then(Modifier.clip(RoundedCornerShape(16.dp)))
+
 @Composable
 private fun DaySeparator(ts: Long) {
     Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
-        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 1.dp) {
             Text(
                 dayLabel(ts), modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -422,262 +487,3 @@ private fun DaySeparator(ts: Long) {
         }
     }
 }
-
-@Composable
-private fun MessageBubble(
-    m: MessageEntity,
-    contPrev: Boolean,
-    showSender: Boolean,
-    flash: Boolean,
-    onReplyQuoteClick: () -> Unit,
-    onReply: () -> Unit,
-) {
-    val ext = LocalExtColors.current
-    val cs = MaterialTheme.colorScheme
-    val side = sideOf(m.role)
-    val (bg, fg) = when (m.role) {
-        "owner" -> cs.primaryContainer to cs.onPrimaryContainer
-        "admin", "model", "bot_auto" -> ext.greenContainer to ext.onGreenContainer
-        else -> cs.surfaceContainerHigh to cs.onSurface
-    }
-    val accent = when (m.role) { "owner" -> cs.onPrimaryContainer; "admin", "model", "bot_auto" -> ext.green; else -> cs.primary }
-
-    // flat corner on the side that faces the screen edge (start edge for incoming, end edge for outgoing);
-    // the top one only when this bubble continues a group, the bottom one always — same rule as the web panel
-    val big = 20.dp
-    val small = 6.dp
-    val shape = if (side == Side.IN) {
-        RoundedCornerShape(topStart = if (contPrev) small else big, topEnd = big, bottomEnd = big, bottomStart = small)
-    } else {
-        RoundedCornerShape(topStart = big, topEnd = if (contPrev) small else big, bottomEnd = small, bottomStart = big)
-    }
-
-    val flashAlpha by animateFloatAsState(if (flash) 0.35f else 0f, tween(if (flash) 160 else 500), label = "flash")
-    var menu by remember { mutableStateOf(false) }
-    val clipboard = LocalClipboardManager.current
-    val copiedText = stringResource(R.string.copied)
-
-    Row(
-        Modifier.fillMaxWidth().padding(top = if (contPrev) 0.dp else 6.dp),
-        horizontalArrangement = if (side == Side.OUT) Arrangement.End else Arrangement.Start,
-    ) {
-        Box {
-            Surface(
-                color = bg, contentColor = fg, shape = shape,
-                modifier = Modifier
-                    .widthIn(max = 300.dp)
-                    .clip(shape)
-                    .drawWithContent {
-                        drawContent()
-                        if (flashAlpha > 0.001f) {
-                            drawOutline(shape.createOutline(size, layoutDirection, this), color = cs.primary, alpha = flashAlpha)
-                        }
-                    }
-                    .combinedClickable(onClick = {}, onLongClick = { menu = true }),
-            ) {
-                Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                    val label = when {
-                        m.role == "owner" -> stringResource(R.string.role_owner)
-                        m.role == "admin" -> stringResource(R.string.role_admin)
-                        m.role == "model" -> stringResource(R.string.role_model)
-                        m.role == "bot_auto" -> stringResource(R.string.role_auto)
-                        showSender && m.sender.isNotEmpty() -> m.sender
-                        else -> ""
-                    }
-                    if (label.isNotEmpty() && !contPrev) Text(label, style = MaterialTheme.typography.labelMedium, color = accent)
-                    if (m.forwardedFrom.isNotEmpty()) {
-                        Text(stringResource(R.string.forwarded_from_fmt, m.forwardedFrom), style = MaterialTheme.typography.labelSmall, color = fg.copy(alpha = 0.75f))
-                    }
-                    if (m.replyPreview.isNotEmpty()) ReplyQuote(m.replyPreview, accent, onReplyQuoteClick)
-                    MediaBlock(m)
-                    if (m.text.isNotEmpty() && m.type != "sticker") {
-                        Text(m.text, style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp, lineHeight = 22.sp))
-                    }
-                    Row(Modifier.align(Alignment.End).padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        val react = (m.theirReaction + m.myReaction)
-                        if (react.isNotEmpty()) Text(react, fontSize = 13.sp, modifier = Modifier.padding(end = 6.dp))
-                        Text(m.time, style = MaterialTheme.typography.labelSmall, color = fg.copy(alpha = 0.65f))
-                    }
-                }
-            }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                if (m.msgId.isNotEmpty()) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.reply)) },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Rounded.Reply, null) },
-                        onClick = { menu = false; onReply() },
-                    )
-                }
-                if (m.text.isNotEmpty()) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.copy)) },
-                        onClick = { menu = false; clipboard.setText(AnnotatedString(m.text)) },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ReplyQuote(preview: String, accent: Color, onClick: () -> Unit) {
-    Row(
-        Modifier.padding(top = 2.dp, bottom = 6.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick)
-            .background(accent.copy(alpha = 0.12f)).height(IntrinsicSize.Min),
-    ) {
-        Box(Modifier.width(3.dp).fillMaxHeight().background(accent))
-        Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.AutoMirrored.Rounded.Reply, null, Modifier.size(15.dp), tint = accent)
-            Text(
-                preview, modifier = Modifier.padding(start = 6.dp), maxLines = 2, overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-    }
-}
-
-/** Photos and stickers render inline; video / voice / files show a labelled chip until playback lands in a later version. */
-@Composable
-private fun MediaBlock(m: MessageEntity) {
-    if (m.type.isEmpty() || m.fileId.isEmpty()) return
-    val app = appOf()
-    val ctx = LocalContext.current
-    fun request() = ImageRequest.Builder(ctx).data(app.api.mediaUrl(m.fileId))
-        .addHeader("Authorization", "Bearer " + app.prefs.token).crossfade(true).build()
-
-    when (m.type) {
-        "photo" -> AsyncImage(
-            model = request(), contentDescription = stringResource(R.string.media_photo), contentScale = ContentScale.Fit,
-            modifier = Modifier.padding(bottom = 4.dp).widthIn(max = 280.dp).heightIn(max = 340.dp).clip(RoundedCornerShape(12.dp)),
-        )
-        "sticker" -> Box(Modifier.size(128.dp), contentAlignment = Alignment.Center) {
-            Text(m.text, fontSize = 52.sp)                       // the sticker's emoji shows if the image format can't be decoded
-            AsyncImage(model = request(), contentDescription = stringResource(R.string.media_sticker), contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
-        }
-        "voice" -> VoiceBar(m.fileId)
-        "video" -> VideoTile(m.fileId, stringResource(R.string.media_video), loop = false)
-        "animation" -> VideoTile(m.fileId, stringResource(R.string.media_gif), loop = true)
-        else -> {
-            // documents: a labelled chip (opening / saving files comes later)
-            Row(
-                Modifier.padding(vertical = 4.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.12f)).padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Rounded.InsertDriveFile, null, Modifier.size(28.dp))
-                Text(stringResource(R.string.media_doc), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 10.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun Composer(
-    chat: ChatEntity?,
-    draft: String,
-    onDraft: (String) -> Unit,
-    replyTo: MessageEntity?,
-    onCancelReply: () -> Unit,
-    senderMode: String,
-    onSenderMode: (String) -> Unit,
-    sending: Boolean,
-    onSend: () -> Unit,
-    recording: Boolean,
-    recordMs: Long,
-    onMic: () -> Unit,
-    onCancelRecording: () -> Unit,
-    onSendRecording: () -> Unit,
-    onAttachGallery: () -> Unit,
-    onAttachCamera: () -> Unit,
-    onAttachFile: () -> Unit,
-) {
-    var attachMenu by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().imePadding().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        // business chats can be answered "as me" or as the bot (same switch the web panel has)
-        if (chat != null && chat.bizId.isNotEmpty()) {
-            Row(Modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = senderMode == "bot", onClick = { onSenderMode("bot") }, label = { Text(stringResource(R.string.sender_bot)) })
-                FilterChip(selected = senderMode == "me", onClick = { onSenderMode("me") }, label = { Text(stringResource(R.string.sender_me)) })
-            }
-        }
-        Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-            Column {
-                AnimatedVisibility(visible = replyTo != null, enter = fadeIn(), exit = fadeOut()) {
-                    if (replyTo != null) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.AutoMirrored.Rounded.Reply, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                            Text(
-                                stringResource(R.string.replying_to_fmt, replyTo.replyPreviewOrText()),
-                                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                                maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            IconButton(onClick = onCancelReply) { Icon(Icons.Rounded.Close, stringResource(R.string.close), Modifier.size(18.dp)) }
-                        }
-                    }
-                }
-                if (recording) {
-                    // recording bar: cancel · red dot + timer · send
-                    Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = onCancelRecording) { Icon(Icons.Rounded.Close, stringResource(R.string.cancel), tint = MaterialTheme.colorScheme.error) }
-                        Box(Modifier.size(10.dp).clip(CircleShape).background(MaterialTheme.colorScheme.error))
-                        Text(
-                            stringResource(R.string.recording) + "  " + (recordMs / 60000).toString() + ":" + ((recordMs / 1000) % 60).toString().padStart(2, '0'),
-                            modifier = Modifier.weight(1f).padding(horizontal = 10.dp), style = MaterialTheme.typography.bodyLarge,
-                        )
-                        FilledIconButton(onClick = onSendRecording, modifier = Modifier.size(48.dp)) {
-                            Icon(Icons.AutoMirrored.Rounded.Send, stringResource(R.string.send))
-                        }
-                    }
-                } else {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Box(Modifier.padding(start = 4.dp, bottom = 4.dp)) {
-                            IconButton(onClick = { attachMenu = true }) { Icon(Icons.Rounded.AttachFile, stringResource(R.string.attach)) }
-                            DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.attach_gallery)) }, leadingIcon = { Icon(Icons.Rounded.Image, null) },
-                                    onClick = { attachMenu = false; onAttachGallery() },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.attach_camera)) }, leadingIcon = { Icon(Icons.Rounded.PhotoCamera, null) },
-                                    onClick = { attachMenu = false; onAttachCamera() },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.attach_file)) }, leadingIcon = { Icon(Icons.Rounded.InsertDriveFile, null) },
-                                    onClick = { attachMenu = false; onAttachFile() },
-                                )
-                            }
-                        }
-                        TextField(
-                            value = draft, onValueChange = onDraft,
-                            placeholder = { Text(stringResource(R.string.type_message)) },
-                            maxLines = 5,
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, disabledContainerColor = Color.Transparent,
-                                focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, disabledIndicatorColor = Color.Transparent,
-                            ),
-                            modifier = Modifier.weight(1f),
-                        )
-                        // send when there is text, microphone when there is not (same morph as the web composer)
-                        Box(Modifier.padding(4.dp)) {
-                            androidx.compose.animation.AnimatedVisibility(visible = draft.isNotBlank(), enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
-                                FilledIconButton(onClick = onSend, enabled = !sending, modifier = Modifier.size(48.dp)) {
-                                    Icon(Icons.AutoMirrored.Rounded.Send, stringResource(R.string.send))
-                                }
-                            }
-                            androidx.compose.animation.AnimatedVisibility(visible = draft.isBlank(), enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
-                                IconButton(onClick = onMic, enabled = !sending, modifier = Modifier.size(48.dp)) {
-                                    Icon(Icons.Rounded.Mic, stringResource(R.string.record_voice))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun MessageEntity.replyPreviewOrText(): String = text.ifEmpty { sender }.take(60)

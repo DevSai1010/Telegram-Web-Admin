@@ -105,6 +105,59 @@ data class ApiAck(
     val success: Boolean = false,
     @Serializable(with = FlexString::class) val error: String = "",
     @Serializable(with = FlexString::class) val name: String = "",
+    @Serializable(with = FlexString::class) val message: String = "",
+    @Serializable(with = FlexString::class) val resolvedChatId: String = "",
+)
+
+@Serializable
+data class ProfileDto(
+    @Serializable(with = FlexString::class) val id: String = "",
+    @Serializable(with = FlexString::class) val first_name: String = "",
+    @Serializable(with = FlexString::class) val last_name: String = "",
+    @Serializable(with = FlexString::class) val username: String = "",
+    @Serializable(with = FlexString::class) val bio: String = "",
+    val limited: Boolean = false,
+    @Serializable(with = FlexString::class) val limited_reason: String = "",
+    @Serializable(with = FlexString::class) val error: String = "",
+)
+
+@Serializable
+data class MediaItemDto(
+    @Serializable(with = FlexString::class) val file_id: String = "",
+    @Serializable(with = FlexString::class) val id: String = "",
+    @Serializable(with = FlexString::class) val time: String = "",
+    @Serializable(with = FlexString::class) val text: String = "",
+)
+
+@Serializable
+data class ChatMediaDto(
+    val photo: List<MediaItemDto> = emptyList(),
+    val video: List<MediaItemDto> = emptyList(),
+    val voice: List<MediaItemDto> = emptyList(),
+    val document: List<MediaItemDto> = emptyList(),
+)
+
+@Serializable
+data class ChatCfgDto(
+    val ai_mode: Boolean = true,
+    @Serializable(with = FlexString::class) val system_prompt: String = "",
+)
+
+@Serializable
+data class StickerDto(
+    @Serializable(with = FlexString::class) val file_id: String = "",
+    @Serializable(with = FlexString::class) val emoji: String = "",
+)
+
+@Serializable
+data class StickerSetDto(
+    val stickers: List<StickerDto> = emptyList(),
+    @Serializable(with = FlexString::class) val error: String = "",
+)
+
+@Serializable
+data class SettingsDto(
+    @Serializable(with = FlexString::class) val sticker_packs: String = "",
 )
 
 @Serializable
